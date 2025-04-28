@@ -6,13 +6,13 @@
 #include "Model.hpp"
 #include "utils.hpp"
 #include "Trainer.hpp"
+#include "Dataset.hpp"
 
 using namespace Model;
 using namespace utils;
 namespace fs = boost::filesystem;
 
 // - FInish utilis.cpp
-// - To do finish Creating dataset class for Oxford Dataset
 // - Train the ConvNext and MobileVit
 // - Try pruninig or quantization
 struct Mnist_Classifier
@@ -50,13 +50,13 @@ struct Mnist_Classifier
         auto image = batch.data[0];   // shape: [1, 28, 28]
         auto label = batch.target[0]; // shape: [1]
 
-        const int image_channel = image.sizes()[1];
-        Classifier model = Classifier(image_channel,feature_dims,num_classes);
+        const int image_size = image.sizes()[1]; // image_size
+        Classifier model = Classifier(image_size,feature_dims,num_classes);
         model->to(device);
         // torch::optim::SGD optimizer(model->parameters(),torch::optim::SGDOptions(learning_rate));
         torch::optim::Adam optimizer(model->parameters(), /*lr=*/learning_rate);
 
-        Trainer<Classifier> trainer(&optimizer, num_epochs, device, true, model_save_path,num_train_samples);
+        Trainer<Classifier> trainer(&optimizer, num_epochs, device, true, model_save_path,num_train_samples,false,num_classes);
         
         std::map<std::string, std::vector<float>> history = trainer.fit(model, *train_loader, *test_loader);
 
@@ -112,12 +112,74 @@ int main(int argc, char* argv[]) {
     }
     torch::Device device(device_type);
 
-    Mnist_Classifier classifier;
-    classifier.run(dataset_path,save_path,device);
+    // Mnist_Classifier classifier;
+    // classifier.run(dataset_path,save_path,device);
 
-      
+    // Hyperparameters
+    const int64_t num_classes = 1;
+    std::vector<int> feature_dims = {32,64,128,256,512};
+    const int64_t batch_size = 32;
+    const size_t num_epochs = 10;
+    const double learning_rate = 0.0015; 
+
+    fs::path image_dir = "/home/shiv/Desktop/Pytorch_project/data/Oxford_IIIT_PET/images";
+    fs::path label_path = "/home/shiv/Desktop/Pytorch_project/data/Oxford_IIIT_PET/annotations/list.txt";
+
+    auto data = get_image_path_and_labels(image_dir,label_path,true);
+
+    auto image_paths = std::get<0>(data);
+    auto labels = std::get<1>(data);
+    auto [train_images, test_images, train_labels, test_labels] = train_test_split(image_paths, labels, 0.2f);
+    auto train_dataset = (
+        CustomDataset(train_images, train_labels, Mode::Train)
+        .map(torch::data::transforms::Normalize<>(
+            {0.485, 0.456, 0.406},
+            {0.229, 0.224, 0.225}
+        ))
+        .map(torch::data::transforms::Stack<>())
+    ); // this has a format of MapDataset(with CustomDataset, NOrmalize and stack)
+    auto test_dataset = (CustomDataset(test_images, test_labels, Mode::Train)
+        .map(torch::data::transforms::Normalize<>(
+            {0.485, 0.456, 0.406},
+            {0.229, 0.224, 0.225}
+        ))
+        .map(torch::data::transforms::Stack<>())
+    );
+    size_t num_train_samples = (int)train_dataset.size().value();
+    std::cout << num_train_samples << std::endl;
+
+    auto train_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
+        std::move(train_dataset), batch_size);
+
+    auto test_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+        std::move(test_dataset), batch_size);
+
+    auto batch_iter = train_loader->begin(); // iterator 
+    auto batch = *batch_iter; // gives out [batch_size,1,height,width] so we derefernce first or (*batch_iter).data[0]
+
+    // Access image and label from the batch
+    auto image = batch.data[0];   // shape: [channel,hegiht,width]
+    auto label = batch.target[0]; // shape: [1]
+
+    const int image_size = image.sizes()[0];
+    ConvNextClassifier model(num_classes,feature_dims,image_size,true);
+    model->to(device);
+    
+    torch::optim::Adam optimizer(model->parameters(), /*lr=*/learning_rate);
+
+    Trainer<ConvNextClassifier> trainer(&optimizer, num_epochs, device, false, save_path,num_train_samples,true,num_classes);
+    
+    std::map<std::string, std::vector<float>> history = trainer.fit(model, *train_loader, *test_loader);
+    std::cout << "Training completed!" << std::endl;
+    std::cout << "Final training loss: " << history["train_loss"].back() << std::endl;
+    std::cout << "Final training accuracy: " << history["train_accu"].back() << std::endl;
+    std::cout << "Final test loss: " << history["test_loss"].back() << std::endl;
+    std::cout << "Final test accuracy: " << history["test_accu"].back() << std::endl;
+
     return 0;
 }
+
+//  ./build/mnist /home/shiv/Desktop/Pytorch_project/data /home/shiv/Desktop/Pytorch_project/model/mnist_convnext_2.pth
 
 
 

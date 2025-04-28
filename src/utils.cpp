@@ -9,6 +9,171 @@ namespace utils
         }
         return total_params;
     }
+
+    std::tuple<float, float, float> compute_batch_metrics_binary(const std::vector<int>& targets, const std::vector<int>& preds) {
+        int64_t tp = 0, fp = 0, fn = 0;
+        for (size_t i = 0; i < preds.size(); ++i) {
+            bool p = preds[i] == 1;
+            bool t = targets[i] == 1;
+    
+            if (p && t) tp++;
+            else if (p && !t) fp++;
+            else if (!p && t) fn++;
+        }
+    
+        float precision = tp / float(tp + fp + 1e-6);
+        float recall = tp / float(tp + fn + 1e-6);
+        float f1 = 2 * precision * recall / (precision + recall + 1e-6);
+    
+        return std::make_tuple(precision, recall, f1);
+    }
+    
+
+    std::tuple<float, float, float> compute_batch_metrics_multiclass(const std::vector<int>& targets, const std::vector<int>& preds, int num_classes){
+        std::vector<int> tp(num_classes, 0), fp(num_classes, 0), fn(num_classes, 0);
+    
+        for (size_t i = 0; i < preds.size(); ++i) {
+            int p = preds[i];
+            int t = targets[i];
+            if (p == t) {
+                tp[p]++;
+            } else {
+                fp[p]++;
+                fn[t]++;
+            }
+        }
+    
+        float total_precision = 0.0f, total_recall = 0.0f, total_f1 = 0.0f;
+        int non_zero_classes = 0;
+    
+        for (int i = 0; i < num_classes; ++i) {
+            float precision = tp[i] / float(tp[i] + fp[i] + 1e-6);
+            float recall = tp[i] / float(tp[i] + fn[i] + 1e-6);
+            float f1 = 2 * precision * recall / (precision + recall + 1e-6);
+    
+            if ((tp[i] + fp[i] + fn[i]) > 0) { // class exists in batch
+                total_precision += precision;
+                total_recall += recall;
+                total_f1 += f1;
+                non_zero_classes++;
+            }
+        }
+    
+        // Macro average for batch
+        return {
+            total_precision / non_zero_classes,
+            total_recall / non_zero_classes,
+            total_f1 / non_zero_classes
+        };
+    }
+
+    std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<int>> > get_image_path_and_labels(fs::path& image_dir, fs::path& annotation_path, bool binary){
+        std::vector<std::string> image_paths; 
+        std::vector<int> labels;
+
+        if (!fs::exists(image_dir) || !fs::is_directory(image_dir)) {
+            throw std::runtime_error("Invalid directory path: " + image_dir.string());
+        }
+        if (!fs::exists(annotation_path) || !fs::is_regular_file(annotation_path)) {
+            throw std::runtime_error("Invalid annotation file path: " + annotation_path.string());
+        }
+
+        std::unordered_map<std::string, int> image_to_label;
+        std::ifstream infile(annotation_path.string());
+        std::string line;
+
+        while (std::getline(infile, line)) {
+            if (line.empty() || line[0] == '#') continue;
+
+            std::istringstream iss(line);
+            std::string image_name;
+            int class_id, species_id, _; // the 4th column is ignored
+            if (!(iss >> image_name >> class_id >> species_id >> _)) continue; // Ensure that we get 4 valid column like lines before provessing 
+
+            int label = binary ? (std::isupper(image_name[0]) ? 1 : 0) : class_id; // if binary then based on this : 
+            // All images with 1st letter as captial are cat images while images with small first letter are dog images. Cat 1 Dog 0
+            // Else we retrieve the class ID // https://www.kaggle.com/datasets/julinmaloof/the-oxfordiiit-pet-dataset/data 
+            image_to_label[image_name] = label;
+        }
+
+        std::vector<std::string> valid_extensions = {".jpg", ".jpeg", ".png"};
+        for (const auto& entry : fs::directory_iterator(image_dir)) {
+            if (fs::is_regular_file(entry)) {
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (std::find(valid_extensions.begin(), valid_extensions.end(), ext) == valid_extensions.end())
+                    continue;
+
+                std::string filename = entry.path().stem().string(); // used as key ex : Bombay_93
+                if (image_to_label.find(filename) != image_to_label.end()) {
+                    image_paths.push_back(entry.path().string());
+                    labels.push_back(image_to_label[filename]);
+                }
+            }
+        }
+        return std::make_tuple(std::make_shared<std::vector<std::string>>(std::move(image_paths)),
+               std::make_shared<std::vector<int>>(std::move(labels)));
+    }
+    std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<std::string>>, 
+               std::shared_ptr<std::vector<int>>, std::shared_ptr<std::vector<int>> > train_test_split(std::shared_ptr<std::vector<std::string>> image_paths, std::shared_ptr<std::vector<int>> labels  ,float test_size)
+    {
+        if (image_paths->size() != labels->size()) {
+            throw std::invalid_argument("image_paths and labels must have the same size.");
+        }
+
+        size_t total_size = image_paths->size();
+        size_t test_count = static_cast<size_t>(total_size * test_size);
+        std::vector<size_t> indices(total_size);
+        for (size_t i = 0; i < total_size; ++i) {
+            indices[i] = i;
+        }
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::shuffle(indices.begin(), indices.end(), gen);
+
+        // Preallocate
+        auto train_images = std::make_shared<std::vector<std::string>>();
+        auto test_images = std::make_shared<std::vector<std::string>>();
+        auto train_labels = std::make_shared<std::vector<int>>();
+        auto test_labels = std::make_shared<std::vector<int>>();
+
+        train_images->reserve(total_size - test_count);
+        test_images->reserve(test_count);
+        train_labels->reserve(total_size - test_count);
+        test_labels->reserve(test_count);
+
+        for (size_t i = 0; i < total_size; ++i) {
+            size_t idx = indices[i];
+            if (i < test_count) {
+                test_images->emplace_back(std::move((*image_paths)[idx])); // since we are moving the values from image paths to test_images the image_paths are empty and do not contain values
+                test_labels->emplace_back((*labels)[idx]);
+            } else {
+                train_images->emplace_back(std::move((*image_paths)[idx]));
+                train_labels->emplace_back((*labels)[idx]);
+            }
+        }
+
+        return {train_images, test_images, train_labels, test_labels};
+    }
+    
+    cv::Mat TensortoCV(torch::Tensor& tensor_image) {
+        // std::cout << "Tensor shape: " << tensor_image.sizes() << std::endl;
+        tensor_image = tensor_image.to(torch::kCPU);
+        tensor_image = tensor_image.permute({1, 2, 0}).mul(255).clamp(0, 255).to(torch::kU8); // CHW -> HWC
+        tensor_image = tensor_image.contiguous().to(torch::kCPU);
+        // std::cout << "tensor to cv done" << std::endl;
+    
+        // Ensure the data is contiguous and correctly cast to uint8_t
+        return cv::Mat(tensor_image.size(0), tensor_image.size(1), CV_8UC3, tensor_image.data_ptr<uint8_t>());
+    }
+    torch::Tensor CVtoTensor(cv::Mat& image) {
+        // Convert OpenCV Mat to Torch Tensor
+        image.convertTo(image, CV_32F, 1.0 / 255);
+        torch::Tensor tensor_image = torch::from_blob(image.data, {image.rows, image.cols, image.channels()}, torch::kFloat);
+        tensor_image = tensor_image.permute({2, 0, 1}); // Change from HWC to CHW
+        return tensor_image.clone(); // Ensure ownership
+    }
     
 } // namespace utils
 

@@ -8,13 +8,15 @@
 
 template <typename ModelType>
 Trainer<ModelType>::Trainer(torch::optim::Optimizer* optimizer_, int num_epochs_, torch::Device device_,
-                            bool save_model_, const boost::filesystem::path save_path_,size_t train_size)
+                            bool save_model_, const boost::filesystem::path save_path_,size_t train_size, bool binary, int num_classes)
     : optimizer(optimizer_),
       num_epochs(num_epochs_),
       device(device_),
       save_model(save_model_),
       save_path(save_path_),
-      train_size_(train_size) {}
+      train_size_(train_size),
+      binary_(binary),
+      num_classes(num_classes) {}
 
 
 template <typename ModelType>
@@ -54,6 +56,10 @@ std::map<std::string, std::vector<float>> Trainer<ModelType>::fit(ModelType& mod
 
         std::cout << "----------------------------------------------" << std::endl;
     }
+    auto [avg_precision, avg_recall, avg_f1] = metrics_acc.average();
+    std::cout << "Avg Precision: " << avg_precision
+          << " | Avg Recall: " << avg_recall
+          << " | Avg F1 Score: " << avg_f1 << std::endl;
 
     if (save_model) {
         std::cout << "Saving model............................." << std::endl;
@@ -77,17 +83,30 @@ std::tuple<float, float> Trainer<ModelType>::train(ModelType& model, Dataloader&
         auto target = batch.target.to(device);
         torch::Tensor output;
         torch::Tensor loss;
-
+        torch::Tensor prediction;
         optimizer->zero_grad();
 
-        // Forward pass using the specific model's forward function
         output = model->forward({data}); 
-        loss = torch::nn::functional::cross_entropy(output, target);
+        // std::cout << output.sizes() << std::endl;
+        // std::cout << target.sizes() << std::endl;
+        if(!binary_){
+            loss = torch::nn::functional::cross_entropy(output, target);
+            loss.backward();
+            optimizer->step();
 
-        loss.backward();
-        optimizer->step();
+            prediction = output.argmax(1);
 
-        auto prediction = output.argmax(1);
+        }else{
+            // output shape [batch_size, 1]
+            target = target.view({-1, 1});  // matching target shape 
+            loss = torch::nn::functional::binary_cross_entropy_with_logits(output, target);  // Binary loss
+            loss.backward();
+            optimizer->step();
+
+            // For binary classification, threshold logits at 0.5 
+            prediction = (output > 0.5).to(torch::kLong);
+        }
+        
         size_t num_correct = prediction.eq(target).sum().item().toInt();
         total_num_correct += num_correct;
         total_loss += loss.item().toFloat() * data.size(0);
@@ -117,25 +136,44 @@ std::tuple<float, float> Trainer<ModelType>::test(ModelType& model, Dataloader& 
     size_t total_num_correct = 0;
     float total_loss = 0.0;
     size_t num_samples = 0;
-
+    float precision, recall,f1;
     torch::NoGradGuard no_grad;
+    std::vector<int> preds_vec, targets_vec;
 
     for (const auto& batch : test_loader) {
         auto data = batch.data.to(device);
         auto target = batch.target.to(device);
+        torch::Tensor loss;
+        torch::Tensor prediction;
 
-        // Forward pass using the specific model's forward function
         auto output = model->forward({data});
-        auto loss = torch::nn::functional::cross_entropy(output, target);
-
+        if(!binary_){
+            loss = torch::nn::functional::cross_entropy(output, target);
+            prediction = output.argmax(1);
+        }else{
+            loss = torch::nn::functional::binary_cross_entropy_with_logits(output, target);
+            prediction = output > 0.5;
+        }
+        
         // Calculate statistics
-        auto prediction = output.argmax(1);
+        auto pred_cpu = prediction.to(torch::kCPU);
+        auto target_cpu = target.to(torch::kCPU);
+
+        for (int i = 0; i < pred_cpu.size(0); ++i) {
+            preds_vec.push_back(pred_cpu[i].template item<int>());
+            targets_vec.push_back(target_cpu[i].template item<int>());
+        }
+        if(binary_){
+            std::tie(precision, recall, f1) = compute_batch_metrics_binary(targets_vec, preds_vec);
+        }else{
+            std::tie(precision,recall,f1) = compute_batch_metrics_multiclass(targets_vec,preds_vec,num_classes);
+        }
+        metrics_acc.add(precision, recall, f1);
         size_t num_correct = prediction.eq(target).sum().item().toInt();
         total_num_correct += num_correct;
         total_loss += loss.item().toFloat() * data.size(0);
         num_samples += data.size(0);
     }
-
     float avg_loss = total_loss / num_samples;
     float accuracy = static_cast<float>(total_num_correct) / num_samples * 100.0f;
 

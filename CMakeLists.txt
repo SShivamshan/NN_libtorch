@@ -45,6 +45,8 @@ set(SOURCES
     src/Model.cpp
     src/Backbone.cpp
     src/utils.cpp
+    src/Dataset.cpp
+    src/Augmentation.cpp
 )
 
 # Header files
@@ -55,6 +57,8 @@ set(HEADERS
     include/Backbone.hpp
     include/Trainer.hpp
     include/Trainer.tpp
+    include/Augmentation.hpp
+    include/Dataset.hpp
 )
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
