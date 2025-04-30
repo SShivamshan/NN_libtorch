@@ -1,6 +1,6 @@
 # Libtorch implementation of Neural Networks and other models
 
-This project focuses on implementing and transforming machine learning classifiers from Python (PyTorch) to C++. It includes a simple neural network classifier trained on the MNIST dataset, as well as more advanced models like ConvNeXt and MobileViT, which were evaluated on the Oxford-IIIT Pet Dataset (Cats vs. Dogs). The aim is to replicate and optimize these models in C++ for improved performance and deployment flexibility.
+This project focuses on implementing and transforming machine learning classifiers from Python (PyTorch) to C++. It includes a simple neural network classifier trained on the MNIST dataset, as well as more advanced models like ConvNeXt and MobileViT, which were evaluated on the Oxford-IIIT Pet Dataset (Cats vs. Dogs). The aim is to replicate and optimize these models in C++ for improved performance and deployment flexibility. Libtorch API : https://pytorch.org/cppdocs/index.html 
 
 ## Features
 
@@ -13,7 +13,7 @@ This project focuses on implementing and transforming machine learning classifie
 ## Prerequisites
 
 - C++11 compatible compiler or higher 
-- CMake (version 3.0 or higher)
+- CMake (version 3.10 or higher)
 - PyTorch C++ (LibTorch)
 - Boost Filesystem
 

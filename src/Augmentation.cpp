@@ -15,12 +15,11 @@ void Augmentations::apply(cv::Mat &rgb) {
         // 2. A probability of applying that augmentation
         std::vector<std::pair<std::function<void()>, double>> augmentations;
         augmentations.push_back({[&]() { randomHorizontalFlip(rgb ); }, 0.5});
-        augmentations.push_back({[&]() { randomRotation(rgb, 15); }, 0.3});
-        augmentations.push_back({[&]() { centerCrop(rgb, 224, 224); }, 0.4});
-        if (!rgb.empty()) {
-            augmentations.push_back({[&]() { randomBrightnessContrast(rgb); }, 0.4});
-        }
-
+        augmentations.push_back({[&]() { randomRotation(rgb, 15); }, 0.4});
+        augmentations.push_back({[&]() { randomResizedCrop(rgb, rgb.rows, rgb.cols, 0.8, 1.0); }, 0.4});
+        augmentations.push_back({[&]() { randomColorJitter(rgb, 0.2, 0.2, 0.2, 0.1); }, 0.5});
+        augmentations.push_back({[&]() { randomErasing(rgb, 0.2); }, 0.3});
+        
         std::shuffle(augmentations.begin(), augmentations.end(), gen);
 
         for (const auto& aug : augmentations) {
@@ -28,9 +27,6 @@ void Augmentations::apply(cv::Mat &rgb) {
                 aug.first();
             }
         }
-    } else {
-        // Test-time augmentation: Only center cropping for consistency
-        centerCrop(rgb, 224, 224);
     }
 }
 void Augmentations::randomHorizontalFlip(cv::Mat &rgb) {
@@ -49,48 +45,140 @@ void Augmentations::randomRotation(cv::Mat &rgb, double max_angle) {
     if (!rgb.empty()) cv::warpAffine(rgb, rgb, rotation_matrix, rgb.size());
 }
 
-void Augmentations::centerCrop(cv::Mat &rgb, int crop_w, int crop_h) {
-    // std::cout << "Applying center crop of size " << crop_w << "x" << crop_h << std::endl;
-    // std::cout << "image size : " << rgb.cols << ", " << rgb.rows << std::endl;
-    // Validate input dimensions
-    int img_width =  rgb.cols;
-    int img_height = rgb.rows;
-    if (crop_w > img_width || crop_h > img_height) {
-        std::cerr << "Error: Crop size exceeds image dimensions!" << std::endl;
-        return;
+void Augmentations::randomResizedCrop(cv::Mat &image, int out_height, int out_width, float min_scale, float max_scale) {
+    // Get random scale and aspect ratio
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> scale_dist(min_scale, max_scale);
+    std::uniform_real_distribution<> aspect_dist(0.75, 1.33);
+    
+    float random_scale = scale_dist(gen);
+    float random_aspect = aspect_dist(gen);
+    
+    int img_height = image.rows;
+    int img_width = image.cols;
+    
+    int crop_height = static_cast<int>(img_height * random_scale);
+    int crop_width = static_cast<int>(crop_height * random_aspect);
+    
+    // Make sure crop dimensions don't exceed image dimensions
+    crop_height = std::min(crop_height, img_height);
+    crop_width = std::min(crop_width, img_width);
+    
+    // Get random crop position
+    std::uniform_int_distribution<> x_dist(0, img_width - crop_width);
+    std::uniform_int_distribution<> y_dist(0, img_height - crop_height);
+    
+    int x = x_dist(gen);
+    int y = y_dist(gen);
+    
+    // Crop and resize
+    cv::Rect crop_rect(x, y, crop_width, crop_height);
+    cv::Mat cropped = image(crop_rect);
+    cv::resize(cropped, image, cv::Size(out_width, out_height), 0, 0, cv::INTER_LINEAR);
+}
+
+void Augmentations::randomColorJitter(cv::Mat &image, float brightness, float contrast, float saturation, float hue) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    
+    // Convert to HSV for easier manipulation
+    cv::Mat hsv;
+    cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
+    
+    // Brightness adjustment in V channel
+    if (brightness > 0) {
+        std::uniform_real_distribution<> bright_dist(-brightness, brightness);
+        float delta = bright_dist(gen) * 255;
+        
+        for (int i = 0; i < hsv.rows; i++) {
+            for (int j = 0; j < hsv.cols; j++) {
+                hsv.at<cv::Vec3b>(i, j)[2] = cv::saturate_cast<uchar>(hsv.at<cv::Vec3b>(i, j)[2] + delta);
+            }
+        }
     }
     
-    // Compute crop position (centered)
-    int x = (img_width - crop_w) / 2;
-    int y = (img_height - crop_h) / 2;
-    cv::Rect crop_roi(x, y, crop_w, crop_h);
-
-    if (!rgb.empty()) {
-        cv::Mat padded_rgb = cv::Mat::zeros(rgb.size(), rgb.type());
-        cv::Mat center_crop_rgb = rgb(crop_roi);
-        center_crop_rgb.copyTo(padded_rgb(crop_roi));
-        rgb = padded_rgb;
+    // Saturation adjustment in S channel
+    if (saturation > 0) {
+        std::uniform_real_distribution<> sat_dist(std::max(0.0f, 1 - saturation), 1 + saturation);
+        float factor = sat_dist(gen);
+        
+        for (int i = 0; i < hsv.rows; i++) {
+            for (int j = 0; j < hsv.cols; j++) {
+                hsv.at<cv::Vec3b>(i, j)[1] = cv::saturate_cast<uchar>(hsv.at<cv::Vec3b>(i, j)[1] * factor);
+            }
+        }
+    }
+    
+    // Hue adjustment in H channel
+    if (hue > 0) {
+        std::uniform_real_distribution<> hue_dist(-hue * 180, hue * 180);
+        int delta = static_cast<int>(hue_dist(gen));
+        
+        for (int i = 0; i < hsv.rows; i++) {
+            for (int j = 0; j < hsv.cols; j++) {
+                int h = hsv.at<cv::Vec3b>(i, j)[0] + delta;
+                if (h < 0) h += 180;
+                if (h >= 180) h -= 180;
+                hsv.at<cv::Vec3b>(i, j)[0] = h;
+            }
+        }
+    }
+    
+    // Convert back to BGR
+    cv::cvtColor(hsv, image, cv::COLOR_HSV2BGR);
+    
+    // Contrast adjustment in BGR
+    if (contrast > 0) {
+        std::uniform_real_distribution<> con_dist(std::max(0.0f, 1 - contrast), 1 + contrast);
+        float factor = con_dist(gen);
+        
+        image.convertTo(image, -1, factor, 0);
     }
 }
 
-void Augmentations::randomBrightnessContrast(cv::Mat &rgb) {
-    // std::cout << "Applying random brightness and contrast" << std::endl;
-
-    // Random brightness and contrast adjustment
-    double alpha = 0.8 + (rand() % 5) / 10.0; // Ensures range [0.8, 1.2]
-    if (alpha < 0.1) alpha = 0.1; // Prevents division issues
-
-    int beta = (rand() % 41) - 20; // Ensures range [-20, 20]
-
-    try {
-        // Apply contrast and brightness, ensuring valid output
-        rgb.convertTo(rgb, -1, alpha, beta);
-
-        // Clip values between 0 and 255
-        cv::threshold(rgb, rgb, 255, 255, cv::THRESH_TRUNC);
-        cv::threshold(rgb, rgb, 0, 0, cv::THRESH_TOZERO);
-    } catch (cv::Exception &e) {
-        std::cerr << "OpenCV Exception in randomBrightnessContrast: " << e.what() << std::endl;
+void Augmentations::randomErasing(cv::Mat &image, float p) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(0.0, 1.0);
+    
+    if (dis(gen) > p) return;
+    
+    // Random erasing parameters
+    std::uniform_real_distribution<> scale_dist(0.02, 0.2);
+    std::uniform_real_distribution<> aspect_dist(0.3, 3.3);
+    std::uniform_int_distribution<> color_dist(0, 255);
+    
+    float area_scale = scale_dist(gen);
+    float aspect_ratio = aspect_dist(gen);
+    
+    int img_h = image.rows;
+    int img_w = image.cols;
+    
+    int erase_area = static_cast<int>(area_scale * img_h * img_w);
+    int erase_h = static_cast<int>(sqrt(erase_area * aspect_ratio));
+    int erase_w = static_cast<int>(sqrt(erase_area / aspect_ratio));
+    
+    // Make sure dimensions are valid
+    erase_h = std::min(erase_h, img_h);
+    erase_w = std::min(erase_w, img_w);
+    
+    // Random position
+    std::uniform_int_distribution<> x_dist(0, img_w - erase_w);
+    std::uniform_int_distribution<> y_dist(0, img_h - erase_h);
+    
+    int x = x_dist(gen);
+    int y = y_dist(gen);
+    
+    // Fill with random color or mean value
+    cv::Rect rect(x, y, erase_w, erase_h);
+    
+    // Create random color
+    cv::Vec3b color;
+    for (int c = 0; c < 3; c++) {
+        color[c] = static_cast<uchar>(color_dist(gen));
     }
+    
+    cv::rectangle(image, rect, cv::Scalar(color[0], color[1], color[2]), -1);
 }
 

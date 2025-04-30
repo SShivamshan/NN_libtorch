@@ -12,7 +12,8 @@ using namespace Model;
 using namespace utils;
 namespace fs = boost::filesystem;
 
-// - FInish utilis.cpp
+// The convnext model is not behaving properly during training (no decrease in trainig loss or test loss)
+// - Load in python
 // - Train the ConvNext and MobileVit
 // - Try pruninig or quantization
 struct Mnist_Classifier
@@ -54,7 +55,7 @@ struct Mnist_Classifier
         Classifier model = Classifier(image_size,feature_dims,num_classes);
         model->to(device);
         // torch::optim::SGD optimizer(model->parameters(),torch::optim::SGDOptions(learning_rate));
-        torch::optim::Adam optimizer(model->parameters(), /*lr=*/learning_rate);
+        torch::optim::Adam optimizer(model->parameters(), learning_rate);
 
         Trainer<Classifier> trainer(&optimizer, num_epochs, device, true, model_save_path,num_train_samples,false,num_classes);
         
@@ -68,7 +69,6 @@ struct Mnist_Classifier
     }
 
 };
-
 
 int main(int argc, char* argv[]) {
     
@@ -117,10 +117,10 @@ int main(int argc, char* argv[]) {
 
     // Hyperparameters
     const int64_t num_classes = 1;
-    std::vector<int> feature_dims = {32,64,128,256,512};
+    std::vector<int> feature_dims = {16,32,64,128,256};
     const int64_t batch_size = 32;
-    const size_t num_epochs = 10;
-    const double learning_rate = 0.0015; 
+    const size_t num_epochs = 20;
+    const double learning_rate = 1e-4; 
 
     fs::path image_dir = "/home/shiv/Desktop/Pytorch_project/data/Oxford_IIIT_PET/images";
     fs::path label_path = "/home/shiv/Desktop/Pytorch_project/data/Oxford_IIIT_PET/annotations/list.txt";
@@ -129,6 +129,8 @@ int main(int argc, char* argv[]) {
 
     auto image_paths = std::get<0>(data);
     auto labels = std::get<1>(data);
+    torch::Tensor weights = compute_pos_weight(*labels);
+    // std::cout << weights << std::endl;
     auto [train_images, test_images, train_labels, test_labels] = train_test_split(image_paths, labels, 0.2f);
     auto train_dataset = (
         CustomDataset(train_images, train_labels, Mode::Train)
@@ -146,7 +148,7 @@ int main(int argc, char* argv[]) {
         .map(torch::data::transforms::Stack<>())
     );
     size_t num_train_samples = (int)train_dataset.size().value();
-    std::cout << num_train_samples << std::endl;
+    // std::cout << num_train_samples << std::endl;
 
     auto train_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
         std::move(train_dataset), batch_size);
@@ -163,11 +165,13 @@ int main(int argc, char* argv[]) {
 
     const int image_size = image.sizes()[0];
     ConvNextClassifier model(num_classes,feature_dims,image_size,true);
+    int64_t params = get_num_parameters(*model);
+    std::cout << params << std::endl;
     model->to(device);
     
-    torch::optim::Adam optimizer(model->parameters(), /*lr=*/learning_rate);
+    torch::optim::Adam optimizer(model->parameters(), torch::optim::AdamOptions(learning_rate));
 
-    Trainer<ConvNextClassifier> trainer(&optimizer, num_epochs, device, false, save_path,num_train_samples,true,num_classes);
+    Trainer<ConvNextClassifier> trainer(&optimizer, num_epochs, device, false, save_path,num_train_samples,true,num_classes,weights);
     
     std::map<std::string, std::vector<float>> history = trainer.fit(model, *train_loader, *test_loader);
     std::cout << "Training completed!" << std::endl;
@@ -175,11 +179,10 @@ int main(int argc, char* argv[]) {
     std::cout << "Final training accuracy: " << history["train_accu"].back() << std::endl;
     std::cout << "Final test loss: " << history["test_loss"].back() << std::endl;
     std::cout << "Final test accuracy: " << history["test_accu"].back() << std::endl;
-
-    return 0;
+    
 }
 
-//  ./build/mnist /home/shiv/Desktop/Pytorch_project/data /home/shiv/Desktop/Pytorch_project/model/mnist_convnext_2.pth
+//  ./build/mnist /home/shiv/Desktop/Pytorch_project/data /home/shiv/Desktop/Pytorch_project/model/mnist_convnext.pth
 
 
 

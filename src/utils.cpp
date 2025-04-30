@@ -9,7 +9,45 @@ namespace utils
         }
         return total_params;
     }
+    
+    bool is_corrupt(const std::string& path) {
+        cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);
+        if (img.empty()) {
+            std::cerr << "Corrupt or unreadable image: " << path << std::endl;
+            return true;
+        }
+        return false;
+    }
 
+    void verify_corrupt_images_dir(fs::path& path){
+        for (const auto& entry : fs::recursive_directory_iterator(path)) {
+            if (fs::is_regular_file(entry.path())) {
+                std::string extension = entry.path().extension().string();
+                std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+                if (extension == ".jpg" || extension == ".jpeg" || extension == ".png") {
+                    is_corrupt(entry.path().string());
+                }
+            }
+        }
+    }
+
+    torch::Tensor compute_pos_weight(const std::vector<int>& labels) {
+        int count_pos = 0, count_neg = 0;
+        for (int label : labels) {
+            if (label == 1)
+                count_pos++;
+            else if (label == 0)
+                count_neg++;
+        }
+    
+        if (count_pos == 0) {
+            throw std::runtime_error("No positive samples in labels.");
+        }
+    
+        float pos_weight_value = static_cast<float>(count_neg) / count_pos;
+        
+        return torch::tensor({pos_weight_value});
+    }
     std::tuple<float, float, float> compute_batch_metrics_binary(const std::vector<int>& targets, const std::vector<int>& preds) {
         int64_t tp = 0, fp = 0, fn = 0;
         for (size_t i = 0; i < preds.size(); ++i) {

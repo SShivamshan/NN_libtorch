@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(mnist)
 
 set(CMAKE_PREFIX_PATH /home/shiv/libtorch
@@ -60,8 +60,10 @@ set(HEADERS
     include/Augmentation.hpp
     include/Dataset.hpp
 )
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+target_precompile_headers(${PROJECT_NAME} PRIVATE <vector> <string> <random>)
 target_link_libraries(${PROJECT_NAME} ${TORCH_LIBRARIES} ${OpenCV_LIBS})
 # Boost linking
 if(Boost_FOUND)

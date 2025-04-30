@@ -6,7 +6,6 @@
 #include <torch/torch.h>
 #include <opencv2/opencv.hpp>
 #include <iostream>
-#include <chrono>
 #include <fstream>
 #include <string>
 #include <sstream>
@@ -21,10 +20,15 @@ namespace fs = boost::filesystem;
 namespace utils{
     enum Mode { Test, Train };
     int64_t get_num_parameters(torch::nn::Module &model);
-    // method to visualize output prediction
-    // method to calculate training time
-    // load model in C++
-
+    bool is_corrupt(const std::string& path);
+    
+    void verify_corrupt_images_dir(fs::path& path);
+    /*
+    Only used for binary cases where the dataset is not equally distributed
+    pos_weights is set as num_negative_class/num_positive_class
+    */
+    torch::Tensor compute_pos_weight(const std::vector<int>& labels);
+    
     std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<int>> > get_image_path_and_labels(fs::path& image_dir, fs::path& annotation_path, bool binary);
     std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<std::string>>, 
                std::shared_ptr<std::vector<int>>, std::shared_ptr<std::vector<int>> > train_test_split(std::shared_ptr<std::vector<std::string>> image_paths, std::shared_ptr<std::vector<int>> labels  ,float test_size = 0.2f);
@@ -54,7 +58,7 @@ namespace utils{
     };
     std::tuple<float, float, float> compute_batch_metrics_multiclass(const std::vector<int>& targets, const std::vector<int>& preds, int num_classes); // 
     std::tuple<float, float, float> compute_batch_metrics_binary(const std::vector<int>& targets, const std::vector<int>& preds);
-    
+    // to load model in c++
 }
 
 

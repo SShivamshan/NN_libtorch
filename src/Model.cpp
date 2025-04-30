@@ -7,7 +7,7 @@ ConvNextClassifierImpl::ConvNextClassifierImpl(int num_classes,
     _convnext = register_module("ConvNext", ConvNext(num_classes, in_channels, image_channel, down_sample));
 
     _avgpool = register_module("AdaptiveAvgPool", torch::nn::AdaptiveAvgPool2d(torch::nn::AdaptiveAvgPool2dOptions({1, 1})));
-
+    _dropout = register_module("Dropout", torch::nn::Dropout(torch::nn::DropoutOptions(0.3)));
     int convnext_output_channels = in_channels.back(); // assuming final stage output
     _classifier = register_module("Classifier", torch::nn::Linear(convnext_output_channels, num_classes));
 }
@@ -17,6 +17,7 @@ torch::Tensor ConvNextClassifierImpl::forward(torch::Tensor x)
     auto feats = _convnext->forward(x); // (B, C, H, W)
     auto pooled = _avgpool(feats);      // (B, C, 1, 1)
     auto flattened = pooled.view({pooled.size(0), -1}); // (B, C)
+    flattened = _dropout(flattened);
     return _classifier(flattened); // (B, num_classes)
 }
 

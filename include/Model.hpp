@@ -36,6 +36,7 @@ namespace Model
             ConvNext _convnext{nullptr};
             torch::nn::AdaptiveAvgPool2d _avgpool{nullptr};
             torch::nn::Linear _classifier{nullptr};
+            torch::nn::Dropout _dropout{nullptr};
     };
 
     TORCH_MODULE(ConvNextClassifier);

@@ -16,8 +16,9 @@ class Augmentations {
 
         void randomHorizontalFlip(cv::Mat &rgb);
         void randomRotation(cv::Mat &rgb, double max_angle);
-        void centerCrop(cv::Mat &rgb, int crop_w, int crop_h);
-        void randomBrightnessContrast(cv::Mat &rgb);
+        void randomColorJitter(cv::Mat &image, float brightness, float contrast, float saturation, float hue);
+        void randomResizedCrop(cv::Mat &image, int out_height, int out_width, float min_scale, float max_scale);
+        void randomErasing(cv::Mat &image, float p);
 };
 
 
