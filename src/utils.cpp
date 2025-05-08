@@ -31,23 +31,64 @@ namespace utils
         }
     }
 
-    torch::Tensor compute_pos_weight(const std::vector<int>& labels) {
-        int count_pos = 0, count_neg = 0;
-        for (int label : labels) {
-            if (label == 1)
-                count_pos++;
-            else if (label == 0)
-                count_neg++;
+    torch::Tensor compute_class_weights(const std::vector<int>& labels) {
+        if (labels.empty()) {
+            throw std::runtime_error("Label vector is empty.");
         }
-    
-        if (count_pos == 0) {
-            throw std::runtime_error("No positive samples in labels.");
-        }
-    
-        float pos_weight_value = static_cast<float>(count_neg) / count_pos;
         
-        return torch::tensor({pos_weight_value});
+        std::unordered_map<int, int> class_counts;
+        int total_samples = labels.size();
+        
+        // Count number of samples per class
+        for (int label : labels) {
+            class_counts[label]++;
+        }
+        
+        int min_label = std::numeric_limits<int>::max();
+        int max_label = std::numeric_limits<int>::min();
+        for (const auto& pair : class_counts) {
+            min_label = std::min(min_label, pair.first);
+            max_label = std::max(max_label, pair.first);
+        }
+        
+        int num_classes = max_label - min_label + 1;
+        std::vector<float> weights(num_classes, 0.0f);
+        
+        // Compute balanced class weights
+        for (const auto& [class_label, count] : class_counts) {
+            float weight = static_cast<float>(total_samples) / (class_counts.size() * count);
+            weights[class_label - min_label] = weight;
+        }
+        
+        return torch::tensor(weights);
     }
+
+    torch::Tensor unnormalize(const torch::Tensor& img) {
+        auto mean = torch::tensor({0.485, 0.456, 0.406}).view({3, 1, 1});
+        auto std = torch::tensor({0.229, 0.224, 0.225}).view({3, 1, 1});
+        return img.mul(std).add(mean).clamp(0, 1);
+    }
+    void visualizeBatchImage(const torch::Tensor& batch_images, const torch::Tensor& batch_labels, int index) {
+        torch::Tensor img = batch_images[index].detach().cpu();
+        img = unnormalize(img);  // Unnormalize
+        img = img.permute({1, 2, 0}).mul(255).to(torch::kU8);
+
+        int height = img.size(0);
+        int width = img.size(1);
+        cv::Mat cv_image(cv::Size(width, height), CV_8UC3, img.data_ptr());
+    
+        std::memcpy(cv_image.data, img.data_ptr(), 
+                    sizeof(torch::kByte) * img.numel());
+        int label = batch_labels[index].item<int>();
+        // Convert RGB to BGR
+        cv::cvtColor(cv_image, cv_image, cv::COLOR_RGB2BGR);
+        std::cout << "Target label : " << std::to_string(label) << std::endl;
+        // Display
+        cv::imshow("Batch Image", cv_image);
+        cv::waitKey(0);
+        cv::destroyAllWindows();
+    }
+
     std::tuple<float, float, float> compute_batch_metrics_binary(const std::vector<int>& targets, const std::vector<int>& preds) {
         int64_t tp = 0, fp = 0, fn = 0;
         for (size_t i = 0; i < preds.size(); ++i) {

@@ -51,7 +51,6 @@ std::map<std::string, std::vector<float>> Trainer<ModelType>::fit(ModelType& mod
     torch::manual_seed(seed);
     float train_loss, train_accuracy, test_loss, test_accuracy;
     std::map<std::string, std::vector<float>> history;
-
     std::cout << "----------------------------------------------" << std::endl;
     std::cout << "\t\tStart training" << std::endl;
     std::cout << "----------------------------------------------" << std::endl;
@@ -101,36 +100,46 @@ std::tuple<float, float> Trainer<ModelType>::train(ModelType& model, Dataloader&
         torch::Tensor output;
         torch::Tensor loss;
         torch::Tensor prediction;
+        size_t num_correct;
         optimizer->zero_grad();
 
         output = model->forward({data}); 
         // std::cout << output.sizes() << std::endl;
         // std::cout << target.sizes() << std::endl;
         if(!binary_){
+            target = target - 1; // for the oxford pet dataset 
             loss = torch::nn::functional::cross_entropy(output, target);
             loss.backward();
             optimizer->step();
 
             prediction = output.argmax(1);
+            num_correct = prediction.eq(target).sum().item().toInt();
 
         }else{
             // output shape [batch_size, 1] target size equals [batch_size]
             auto target_float = target.to(torch::kFloat);
-            target_float = target_float.view({-1, 1});
+            target_float = target_float.view({-1, 1}); // transformed to correspond for the output shape 
             loss = torch::nn::functional::binary_cross_entropy_with_logits(output, target_float,
-            torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight.to(device)).reduction(torch::kMean));  // Binary loss
+                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight[1].to(device)).reduction(torch::kMean));  
+            // std::cout << "Logit min: " << output.min().item<float>() << " max: " << output.max().item<float>() << std::endl;
             loss.backward();
+            if (torch::isnan(loss).any().item<bool>() || torch::isinf(loss).any().item<bool>()) {
+                std::cerr << "Loss is NaN or Inf!" << std::endl;
+                exit(1);
+            }
             // Gradient clipping to prevent exploding gradients
             torch::nn::utils::clip_grad_norm_(model->parameters(), 1.0);
             optimizer->step();
 
             // For binary classification, threshold logits at 0.5 and conversion to target type
-            prediction = (output > 0.5).to(target.dtype());
-            prediction = prediction.view({-1}); // transforms from [batch_size,1] -> [batch_size]
+            auto probas = torch::sigmoid(output);  
+            prediction = (probas >= 0.5).to(target.dtype());
+            prediction = prediction.view({-1}); // transforms from [batch_size,1] -> [batch_size] for latter purpose
             // std::cout << "Prediction shape: " << prediction.sizes() << " | Target shape: " << target.sizes() << std::endl;
+            num_correct = prediction.eq(target).sum().item().toInt();
         }
 
-        size_t num_correct = prediction.eq(target).sum().item().toInt();
+        
         total_num_correct += num_correct;
         total_loss += loss.item().toFloat() * data.size(0);
         num_samples += data.size(0);
@@ -162,6 +171,7 @@ std::tuple<float, float> Trainer<ModelType>::test(ModelType& model, Dataloader& 
     float total_loss = 0.0;
     size_t num_samples = 0;
     float precision, recall,f1;
+    size_t num_correct;
     torch::NoGradGuard no_grad;
     std::vector<int> preds_vec, targets_vec;
 
@@ -173,16 +183,20 @@ std::tuple<float, float> Trainer<ModelType>::test(ModelType& model, Dataloader& 
 
         auto output = model->forward({data});
         if(!binary_){
+            target = target - 1;
             loss = torch::nn::functional::cross_entropy(output, target);
             prediction = output.argmax(1);
+            num_correct = prediction.eq(target).sum().item().toInt();
         }else{
             auto target_float = target.to(torch::kFloat);
             target_float = target_float.view({-1, 1});
-            
+            // auto weight = torch::Tensor({pos_weight[0]/pos_weight[1]}).to(device);
             loss = torch::nn::functional::binary_cross_entropy_with_logits(output, target_float,
-                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight.to(device)).reduction(torch::kMean));
-            prediction = (output > 0.5).to(target.dtype()); // Apply threshold of 0.5
+                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight[1].to(device)).reduction(torch::kMean)); // torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kMean)
+            auto probas = torch::sigmoid(output);  
+            prediction = (probas >= 0.5).to(target.dtype()); // Apply threshold of 0.5
             prediction = prediction.view({-1});
+            num_correct = prediction.eq(target).sum().item().toInt();
         }
 
         // Clear vectors for the next batch
@@ -208,7 +222,7 @@ std::tuple<float, float> Trainer<ModelType>::test(ModelType& model, Dataloader& 
         metrics_acc.add(precision, recall, f1);
 
         // Calculate accuracy
-        size_t num_correct = prediction.eq(target).sum().item().toInt();
+        // size_t num_correct = prediction.eq(target).sum().item().toInt();
         total_num_correct += num_correct;
         total_loss += loss.item().toFloat() * data.size(0);
         num_samples += data.size(0);

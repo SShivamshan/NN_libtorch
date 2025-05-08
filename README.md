@@ -77,7 +77,25 @@ Run the compiled executable with the following command:
 ### ConvNext 
 The ConvNext model was ""translated"" from python to C++ format as closely as possible: https://github.com/facebookresearch/ConvNeXt/blob/main/models/convnext.py and has the following structure : 
 
+#### ConvNext Backbone
 
+Input: Images with configurable channel count (typically 3 for RGB)  
+Stem: Conv2d layer (kernel=4, stride=4, no padding) for initial feature extraction  
+Feature Progression: Five-stage feature extraction (typically [32, 64, 128, 256, 512])  
+Stage Distribution: 3-3-9-3 block arrangement across stages (Stage 3 has the deepest structure)
+
+#### ConvNext Classifier 
+
+Backbone: ConvNext feature extractor
+Pooling: AdaptiveAvgPool2d to 1x1 spatial dimensions
+Classification Head:
+- Fully connected layer: Linear(features → 512)
+- LayerNorm 
+- AvgPooling
+- GelU + Dropout (0.3)
+- Final linear layer: 512 → num_classes(1 for binary and 37 for different breeds)
+
+### MobileViT
 
 
 
@@ -90,6 +108,14 @@ Hyperparameter for the simple neural network :
 - Number of epochs: 10
 - Learning rate: 0.0015
 - Optimizer: Adam
+
+Hyperparameter for the ConvNeXt for breed classification: 
+- Batch size: 32
+- Number of epochs: 25
+- Learning: 1e-4
+- Optimizer: AdamW 
+
+
 
 ## License
 

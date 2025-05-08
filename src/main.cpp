@@ -12,7 +12,6 @@ using namespace Model;
 using namespace utils;
 namespace fs = boost::filesystem;
 
-// The convnext model is not behaving properly during training (no decrease in trainig loss or test loss)
 // - Load in python
 // - Train the ConvNext and MobileVit
 // - Try pruninig or quantization
@@ -57,7 +56,7 @@ struct Mnist_Classifier
         // torch::optim::SGD optimizer(model->parameters(),torch::optim::SGDOptions(learning_rate));
         torch::optim::Adam optimizer(model->parameters(), learning_rate);
 
-        Trainer<Classifier> trainer(&optimizer, num_epochs, device, true, model_save_path,num_train_samples,false,num_classes);
+        Trainer<Classifier> trainer(&optimizer, num_epochs, device, false, model_save_path,num_train_samples,false,num_classes);
         
         std::map<std::string, std::vector<float>> history = trainer.fit(model, *train_loader, *test_loader);
 
@@ -116,11 +115,10 @@ int main(int argc, char* argv[]) {
     // classifier.run(dataset_path,save_path,device);
 
     // Hyperparameters
-    const int64_t num_classes = 1;
-    std::vector<int> feature_dims = {16,32,64,128,256};
+    const int64_t num_classes = 37;
     const int64_t batch_size = 32;
-    const size_t num_epochs = 20;
-    const double learning_rate = 1e-4; 
+    const size_t num_epochs = 25;
+    const double learning_rate = 1e-3; 
 
     fs::path image_dir = "/home/shiv/Desktop/Pytorch_project/data/Oxford_IIIT_PET/images";
     fs::path label_path = "/home/shiv/Desktop/Pytorch_project/data/Oxford_IIIT_PET/annotations/list.txt";
@@ -129,7 +127,7 @@ int main(int argc, char* argv[]) {
 
     auto image_paths = std::get<0>(data);
     auto labels = std::get<1>(data);
-    torch::Tensor weights = compute_pos_weight(*labels);
+    torch::Tensor weights = compute_class_weights(*labels);
     // std::cout << weights << std::endl;
     auto [train_images, test_images, train_labels, test_labels] = train_test_split(image_paths, labels, 0.2f);
     auto train_dataset = (
@@ -140,7 +138,7 @@ int main(int argc, char* argv[]) {
         ))
         .map(torch::data::transforms::Stack<>())
     ); // this has a format of MapDataset(with CustomDataset, NOrmalize and stack)
-    auto test_dataset = (CustomDataset(test_images, test_labels, Mode::Train)
+    auto test_dataset = (CustomDataset(test_images, test_labels, Mode::Test)
         .map(torch::data::transforms::Normalize<>(
             {0.485, 0.456, 0.406},
             {0.229, 0.224, 0.225}
@@ -158,20 +156,24 @@ int main(int argc, char* argv[]) {
 
     auto batch_iter = train_loader->begin(); // iterator 
     auto batch = *batch_iter; // gives out [batch_size,1,height,width] so we derefernce first or (*batch_iter).data[0]
-
+    // visualizeBatchImage(batch.data, batch.target, 0);
     // Access image and label from the batch
     auto image = batch.data[0];   // shape: [channel,hegiht,width]
     auto label = batch.target[0]; // shape: [1]
 
     const int image_size = image.sizes()[0];
-    ConvNextClassifier model(num_classes,feature_dims,image_size,true);
+    ConvNextClassifier model(num_classes,image_size,true);
     int64_t params = get_num_parameters(*model);
     std::cout << params << std::endl;
     model->to(device);
     
-    torch::optim::Adam optimizer(model->parameters(), torch::optim::AdamOptions(learning_rate));
-
-    Trainer<ConvNextClassifier> trainer(&optimizer, num_epochs, device, false, save_path,num_train_samples,true,num_classes,weights);
+    // torch::optim::Adam optimizer(model->parameters(), torch::optim::AdamOptions(learning_rate));
+    // torch::optim::SGD optimizer(model->parameters(), torch::optim::SGDOptions(learning_rate));
+    torch::optim::AdamWOptions options(learning_rate);
+    options.weight_decay(0.001);  
+    torch::optim::AdamW optimizer(model->parameters(), options);
+        
+    Trainer<ConvNextClassifier> trainer(&optimizer, num_epochs, device, true, save_path,num_train_samples,true,num_classes,weights);
     
     std::map<std::string, std::vector<float>> history = trainer.fit(model, *train_loader, *test_loader);
     std::cout << "Training completed!" << std::endl;
@@ -182,7 +184,7 @@ int main(int argc, char* argv[]) {
     
 }
 
-//  ./build/mnist /home/shiv/Desktop/Pytorch_project/data /home/shiv/Desktop/Pytorch_project/model/mnist_convnext.pth
+//  ./build/mnist /home/shiv/Desktop/Pytorch_project/data /home/shiv/Desktop/Pytorch_project/model/convnext.pth
 
 
 

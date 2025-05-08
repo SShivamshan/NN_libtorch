@@ -21,14 +21,13 @@ namespace utils{
     enum Mode { Test, Train };
     int64_t get_num_parameters(torch::nn::Module &model);
     bool is_corrupt(const std::string& path);
-    
+    torch::Tensor unnormalize(const torch::Tensor& img);
     void verify_corrupt_images_dir(fs::path& path);
     /*
-    Only used for binary cases where the dataset is not equally distributed
-    pos_weights is set as num_negative_class/num_positive_class
+    Used for computing the class weights for binary and multi class 
     */
-    torch::Tensor compute_pos_weight(const std::vector<int>& labels);
-    
+   torch::Tensor compute_class_weights(const std::vector<int>& labels);
+    void visualizeBatchImage(const torch::Tensor& batch_images, const torch::Tensor& batch_labels, int index);
     std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<int>> > get_image_path_and_labels(fs::path& image_dir, fs::path& annotation_path, bool binary);
     std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<std::string>>, 
                std::shared_ptr<std::vector<int>>, std::shared_ptr<std::vector<int>> > train_test_split(std::shared_ptr<std::vector<std::string>> image_paths, std::shared_ptr<std::vector<int>> labels  ,float test_size = 0.2f);

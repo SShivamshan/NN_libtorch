@@ -25,26 +25,38 @@ namespace Model
 
     class ConvNextClassifierImpl: public torch::nn::Module {
         public:
-            ConvNextClassifierImpl(int num_classes = 100,
-                    std::vector<int> in_channels = {64, 128, 256, 512, 1024},
-                    const int image_channel = 3,
-                    bool down_sample = true);
-
+            ConvNextClassifierImpl(int num_classes, const int image_channel = 3, bool  use_tiny = false);
             torch::Tensor forward(torch::Tensor x);
 
         private:
-            ConvNext _convnext{nullptr};
+            ConvNeXt convnext{nullptr};
+            torch::nn::AdaptiveAvgPool2d avgpool{nullptr};
+            torch::nn::LayerNorm norm{nullptr};
+            torch::nn::Linear fc{nullptr};
+            torch::nn::Dropout dropout1{nullptr};
+            torch::nn::Dropout dropout2{nullptr};
+            torch::nn::Linear classifier{nullptr};
+    };
+    TORCH_MODULE(ConvNextClassifier);
+    
+    class MobileViTClassifierImpl: public torch::nn::Module{
+        public:
+            MobileViTClassifierImpl(int img_size, std::vector<int> features_list, std::vector<int> d_list,
+                std::vector<int> transformer_depth, int expansion,int num_classes);
+            
+            torch::Tensor forward(torch::Tensor x);
+        
+        private:
+            MobileViT _mobilevit{nullptr};
             torch::nn::AdaptiveAvgPool2d _avgpool{nullptr};
+            torch::nn::Linear _fc{nullptr};
+            torch::nn::BatchNorm1d _batchnorm{nullptr};  
             torch::nn::Linear _classifier{nullptr};
             torch::nn::Dropout _dropout{nullptr};
     };
+    TORCH_MODULE(MobileViTClassifier);
 
-    TORCH_MODULE(ConvNextClassifier);
-    
-
-    
 } // namespace Model
-
 
 
 #endif // MODEL_HPP
