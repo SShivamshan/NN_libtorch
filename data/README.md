@@ -15,5 +15,5 @@ For the Oxford Dataset, which was found here : https://academictorrents.com/deta
 
 But the images are corrupted not many but few, thus i found this solution on this github page : https://github.com/ml4py/dataset-iiit-pet/tree/master which has the corrected dataset. This dataset contains the image in ".jpg" and ".mat" format 
 
-You may simply collect the un corrupted images and them to the dataset or just download the above mentionned dataset itself. 
+You may simply collect the uncorrupted images and them to the dataset or just download the above mentionned dataset itself. 
 
