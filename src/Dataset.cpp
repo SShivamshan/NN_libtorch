@@ -7,7 +7,6 @@ CustomDataset::CustomDataset(std::shared_ptr<std::vector<std::string>> image_pat
 
 }
 
-
 torch::data::Example<> CustomDataset::get(size_t index) {
     cv::Mat bgr_image, rgb_image;
     std::string image_path;
