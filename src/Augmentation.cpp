@@ -61,7 +61,7 @@ void Augmentations::randomResizedCrop(cv::Mat &image, int out_height, int out_wi
     int crop_height = static_cast<int>(img_height * random_scale);
     int crop_width = static_cast<int>(crop_height * random_aspect);
     
-    // Make sure crop dimensions don't exceed image dimensions
+    // crop dimensions so they don't exceed image dimensions
     crop_height = std::min(crop_height, img_height);
     crop_width = std::min(crop_width, img_width);
     
