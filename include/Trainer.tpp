@@ -8,7 +8,7 @@
 
 template <typename ModelType>
 Trainer<ModelType>::Trainer(torch::optim::Optimizer* optimizer_, int num_epochs_, torch::Device device_,
-                            bool save_model_, const boost::filesystem::path save_path_,size_t train_size, bool binary, int num_classes)
+                            bool save_model_, const boost::filesystem::path save_path_,size_t train_size, bool binary, int num_classes,bool oxford)
     : optimizer(optimizer_),
       num_epochs(num_epochs_),
       device(device_),
@@ -16,11 +16,12 @@ Trainer<ModelType>::Trainer(torch::optim::Optimizer* optimizer_, int num_epochs_
       save_path(save_path_),
       train_size_(train_size),
       binary_(binary),
+      oxford(oxford),
       num_classes(num_classes) {}
 
 template <typename ModelType>
 Trainer<ModelType>::Trainer(torch::optim::Optimizer* optimizer_, int num_epochs_, torch::Device device_,
-                                  bool save_model_, const boost::filesystem::path save_path_,size_t train_size, bool binary, int num_classes, torch::Tensor weights)
+                                  bool save_model_, const boost::filesystem::path save_path_,size_t train_size, bool binary, int num_classes, torch::Tensor weights,bool oxford)
     : optimizer(optimizer_),
       num_epochs(num_epochs_),
       device(device_),
@@ -51,12 +52,17 @@ std::map<std::string, std::vector<float>> Trainer<ModelType>::fit(ModelType& mod
     torch::manual_seed(seed);
     float train_loss, train_accuracy, test_loss, test_accuracy;
     std::map<std::string, std::vector<float>> history;
+    
     std::cout << "----------------------------------------------" << std::endl;
     std::cout << "\t\tStart training" << std::endl;
     std::cout << "----------------------------------------------" << std::endl;
 
     auto start = high_resolution_clock::now();
     for (int epoch = 0; epoch < num_epochs; ++epoch) {
+
+        float current_lr = optimizer->param_groups()[0].options().get_lr();
+        std::cout << "Current learning rate: " << current_lr << std::endl;
+
         std::tie(train_loss, train_accuracy) = train(model, train_loader, epoch);
         history["train_loss"].push_back(train_loss);
         history["train_accu"].push_back(train_accuracy);
@@ -65,7 +71,6 @@ std::map<std::string, std::vector<float>> Trainer<ModelType>::fit(ModelType& mod
         std::tie(test_loss, test_accuracy) = test(model, test_loader);
         history["test_loss"].push_back(test_loss);
         history["test_accu"].push_back(test_accuracy);
-
         std::cout << "----------------------------------------------" << std::endl;
     }
     auto end = high_resolution_clock::now();
@@ -107,7 +112,7 @@ std::tuple<float, float> Trainer<ModelType>::train(ModelType& model, Dataloader&
         // std::cout << output.sizes() << std::endl;
         // std::cout << target.sizes() << std::endl;
         if(!binary_){
-            target = target - 1; // for the oxford pet dataset 
+            if(oxford) target = target - 1; // for the oxford pet dataset 
             loss = torch::nn::functional::cross_entropy(output, target);
             loss.backward();
             optimizer->step();
@@ -120,7 +125,7 @@ std::tuple<float, float> Trainer<ModelType>::train(ModelType& model, Dataloader&
             auto target_float = target.to(torch::kFloat);
             target_float = target_float.view({-1, 1}); // transformed to correspond for the output shape 
             loss = torch::nn::functional::binary_cross_entropy_with_logits(output, target_float,
-                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight[1].to(device)).reduction(torch::kMean));  
+                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight[1].to(device)));  
             // std::cout << "Logit min: " << output.min().item<float>() << " max: " << output.max().item<float>() << std::endl;
             loss.backward();
             if (torch::isnan(loss).any().item<bool>() || torch::isinf(loss).any().item<bool>()) {
@@ -183,18 +188,17 @@ std::tuple<float, float> Trainer<ModelType>::test(ModelType& model, Dataloader& 
 
         auto output = model->forward({data});
         if(!binary_){
-            target = target - 1;
+            if(oxford) target = target - 1; // for the oxford pet dataset 
             loss = torch::nn::functional::cross_entropy(output, target);
             prediction = output.argmax(1);
             num_correct = prediction.eq(target).sum().item().toInt();
         }else{
             auto target_float = target.to(torch::kFloat);
             target_float = target_float.view({-1, 1});
-            // auto weight = torch::Tensor({pos_weight[0]/pos_weight[1]}).to(device);
             loss = torch::nn::functional::binary_cross_entropy_with_logits(output, target_float,
-                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight[1].to(device)).reduction(torch::kMean)); // torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kMean)
+                torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight[1].to(device))); 
             auto probas = torch::sigmoid(output);  
-            prediction = (probas >= 0.5).to(target.dtype()); // Apply threshold of 0.5
+            prediction = (probas >= 0.5).to(target.dtype()); 
             prediction = prediction.view({-1});
             num_correct = prediction.eq(target).sum().item().toInt();
         }
@@ -218,7 +222,6 @@ std::tuple<float, float> Trainer<ModelType>::test(ModelType& model, Dataloader& 
             std::tie(precision, recall, f1) = compute_batch_metrics_multiclass(targets_vec, preds_vec, num_classes);
         }
 
-        // Assuming metrics_acc is some accumulator to store cumulative precision/recall/F1
         metrics_acc.add(precision, recall, f1);
 
         // Calculate accuracy
