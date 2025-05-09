@@ -5,39 +5,25 @@ using namespace backbone;
 // https://tech.bertelsmann.com/en/blog/articles/convnext 
 
 // ---------------------------------------------------------------- ConvNeXt ---------------------------------------------------------------- // 
-ConvNeXtBlockImpl::ConvNeXtBlockImpl::ConvNeXtBlockImpl(int in_channels, float drop_path, float layer_scale_init_value):
-    dwconv(torch::nn::Conv2dOptions(in_channels, in_channels, 7).padding(3).groups(in_channels)),
-    norm(torch::nn::LayerNormOptions({in_channels}).elementwise_affine(true)),
-    pwconv1(in_channels, 4 * in_channels),
-    pwconv2(4 * in_channels, in_channels),
-    drop_path_rate(drop_path)
+ConvNeXtBlockImpl::ConvNeXtBlockImpl(int in_channels, float drop_path, float layer_scale_init_value)
+    : dwconv(torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, in_channels, 7).padding(3).groups(in_channels))),
+      norm(torch::nn::LayerNorm(torch::nn::LayerNormOptions({in_channels}).elementwise_affine(true))),
+      pwconv1(torch::nn::Linear(in_channels, 4 * in_channels)),
+      pwconv2(torch::nn::Linear(4 * in_channels, in_channels)),
+      drop_path_rate(drop_path)
 {
     register_module("dwconv", dwconv);
     register_module("norm", norm);
     register_module("pwconv1", pwconv1);
     register_module("pwconv2", pwconv2);
 
-    // Initialize gamma (Layer Scale)
     if (layer_scale_init_value > 0) {
         gamma = register_parameter("gamma", torch::full({in_channels}, layer_scale_init_value));
     }
 
-    // DropPath is only applied during training
-    if (drop_path > 0) {
-        drop_path_enabled = true;
-    }
-
-    // this->apply([](torch::nn::Module& module) {
-    //     if (auto* conv = module.as<torch::nn::Conv2d>()) {
-    //         torch::nn::init::kaiming_normal_(
-    //             conv->weight, 0.0, torch::kFanOut, torch::kReLU);
-    //     } else if (auto* linear = module.as<torch::nn::Linear>()) {
-    //         torch::nn::init::trunc_normal_(linear->weight, 0.02);
-    //         if (linear->bias.defined())
-    //             torch::nn::init::zeros_(linear->bias);
-    //     }
-    // });
+    drop_path_enabled = (drop_path > 0);
 }
+
 
 torch::Tensor ConvNeXtBlockImpl::forward(torch::Tensor x) {
     torch::Tensor residual = x.clone();
@@ -49,8 +35,6 @@ torch::Tensor ConvNeXtBlockImpl::forward(torch::Tensor x) {
     x = torch::gelu(x);
     x = pwconv2->forward(x);
     if (gamma.defined()) {
-        // x = x * gamma;
-        // x = x * gamma.unsqueeze(0).unsqueeze(0).unsqueeze(0);
         x = x * gamma.view({1, 1, 1, -1});
     }
     x = x.permute({0, 3, 1, 2}); // (N, H, W, C) -> (N, C, H, W)
@@ -139,7 +123,7 @@ torch::Tensor MultiHeadSelfAttentionImpl::forward(torch::Tensor x) {
     // std::cout << "x_flat shape: " << x_flat.sizes() << std::endl;
     // std::cout << "to_qvk weight shape: " << to_qvk->weight.sizes() << std::endl;
     
-    // Compute QKV projections - handle potential errors
+    // Compute QKV projections 
     torch::Tensor qkv;
     try {
         qkv = to_qvk->forward(x_flat);
@@ -150,8 +134,6 @@ torch::Tensor MultiHeadSelfAttentionImpl::forward(torch::Tensor x) {
     }
     
     auto qkv_chunks = qkv.chunk(3, -1);
-    
-    // Get projected dimension
     int64_t proj_dim = qkv_chunks[0].size(-1);
     // std::cout << "Projected dimension: " << proj_dim << ", expected: " << num_heads * dim_head << std::endl;
     
