@@ -39,7 +39,7 @@ namespace architecture {
     TORCH_MODULE(ConvNeXt);
     class MobileViTImpl : public torch::nn::Module {
         public:
-            MobileViTImpl(int img_size, std::vector<int> features_list, std::vector<int> d_list,
+            MobileViTImpl(std::vector<int> features_list, std::vector<int> d_list,
                           std::vector<int> transformer_depth, int expansion);
         
             torch::Tensor forward(torch::Tensor x);
