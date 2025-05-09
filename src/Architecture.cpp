@@ -51,27 +51,23 @@ torch::nn::Sequential ConvNeXtImpl::make_stage(int in_channels, int out_channels
     return stage;
 }
 
-DownsampleImpl::DownsampleImpl(int in_channels, int out_channels, int stride) :
-    norm(torch::nn::LayerNormOptions({in_channels})),
-    conv(torch::nn::Conv2dOptions(in_channels, out_channels, 2).stride(stride).padding(0).bias(false))
+DownsampleImpl::DownsampleImpl(int in_channels, int out_channels, int stride)
 {
-    register_module("norm", norm);
-    register_module("conv", conv);
+    norm = register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions({in_channels})));
+    conv = register_module("conv", torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, out_channels, 2).stride(stride).padding(0).bias(false)));
 }
 
+
 torch::Tensor DownsampleImpl::forward(torch::Tensor x) {
-    x = x.permute({0, 2, 3, 1}).contiguous(); // Make it contiguous before norm
+    x = x.permute({0, 2, 3, 1}).contiguous(); 
     x = norm->forward(x);
-    x = x.permute({0, 3, 1, 2}).contiguous(); // Make it contiguous again
+    x = x.permute({0, 3, 1, 2}).contiguous(); 
     x = conv->forward(x);
     return x;
 }
 
-
-
 // ---------------------------------------------------------------- MobileViT ---------------------------------------------------------------- //
-MobileViTImpl::MobileViTImpl(int img_size, std::vector<int> features_list, std::vector<int> d_list,
-    std::vector<int> transformer_depth, int expansion)
+MobileViTImpl::MobileViTImpl(std::vector<int> features_list, std::vector<int> d_list, std::vector<int> transformer_depth, int expansion)
 {
     // Stem Block
     stem = register_module("stem", torch::nn::Sequential(
