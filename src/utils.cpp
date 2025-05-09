@@ -146,7 +146,7 @@ namespace utils
         };
     }
 
-    std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<int>> > get_image_path_and_labels(fs::path& image_dir, fs::path& annotation_path, bool binary){
+    std::tuple<std::shared_ptr<std::vector<std::string>>, std::shared_ptr<std::vector<int>> > get_image_path_and_labels(fs::path image_dir, fs::path annotation_path, bool binary){
         std::vector<std::string> image_paths; 
         std::vector<int> labels;
 
@@ -242,8 +242,7 @@ namespace utils
         tensor_image = tensor_image.permute({1, 2, 0}).mul(255).clamp(0, 255).to(torch::kU8); // CHW -> HWC
         tensor_image = tensor_image.contiguous().to(torch::kCPU);
         // std::cout << "tensor to cv done" << std::endl;
-    
-        // Ensure the data is contiguous and correctly cast to uint8_t
+
         return cv::Mat(tensor_image.size(0), tensor_image.size(1), CV_8UC3, tensor_image.data_ptr<uint8_t>());
     }
     torch::Tensor CVtoTensor(cv::Mat& image) {
@@ -251,8 +250,139 @@ namespace utils
         image.convertTo(image, CV_32F, 1.0 / 255);
         torch::Tensor tensor_image = torch::from_blob(image.data, {image.rows, image.cols, image.channels()}, torch::kFloat);
         tensor_image = tensor_image.permute({2, 0, 1}); // Change from HWC to CHW
-        return tensor_image.clone(); // Ensure ownership
+        return tensor_image.clone(); 
     }
     
+
+    ModelArgs parseArguments(int argc, char* argv[]) {
+        ModelArgs args;
+        args.binary_mode = true;                // Default to binary mode
+        
+        // Print usage if there's no enough arguments
+        if (argc < 2) {
+            std::cerr << "Usage:" << std::endl;
+            std::cerr << "  " << argv[0] << " dataset <mnist_data_path> <save_path>" << std::endl;
+            std::cerr << "  " << argv[0] << " image <image_path> <label_path> <save_path> [--net=<cnn|convnext|mobilevit>] [--binary]" << std::endl;
+            exit(1);
+        }
+        std::string mode = argv[1];
+        // DATASET MODEL:
+        if (mode == "dataset") {
+            if (argc < 4) {
+                std::cerr << "Usage for dataset mode: " << argv[0] << " dataset <mnist_data_path> <save_path>" << std::endl;
+                exit(1);
+            }
+            
+            args.model_type = ModelArgs::DATASET_MODEL;
+            
+            fs::path arg_path(argv[2]);
+            if (arg_path.is_absolute()) {
+                args.dataset_path = arg_path;
+            } else {
+                args.dataset_path = fs::current_path() / arg_path;
+            }
+            
+            fs::path save_arg_path(argv[3]);
+            if (save_arg_path.is_absolute()) {
+                args.save_path = save_arg_path;
+            } else {
+                args.save_path = fs::current_path() / save_arg_path;
+            }
+            
+            std::cout << "Mode: Dataset Model" << std::endl;
+            std::cout << "Dataset Path: " << args.dataset_path << std::endl;
+            std::cout << "Save Path: " << args.save_path << std::endl;
+            
+            // Validate paths
+            if (!fs::exists(args.dataset_path)) {
+                std::cerr << "Error: Dataset path does not exist: " << args.dataset_path << std::endl;
+                exit(1);
+            }
+        }
+        // IMAGE+LABEL MODEL: requires 3 additional args (image path, label path, save path)
+        else if (mode == "image") {
+            if (argc < 5) {
+                std::cerr << "Usage for image mode: " << argv[0] << " image <image_path> <label_path> <save_path>" << std::endl;
+                exit(1);
+            }
+            
+            args.model_type = ModelArgs::IMAGE_LABEL_MODEL;
+
+            fs::path img_path(argv[2]);
+            if (img_path.is_absolute()) {
+                args.image_path = img_path;
+            } else {
+                args.image_path = fs::current_path() / img_path;
+            }
+
+            fs::path lbl_path(argv[3]);
+            if (lbl_path.is_absolute()) {
+                args.label_path = lbl_path;
+            } else {
+                args.label_path = fs::current_path() / lbl_path;
+            }
+
+            fs::path save_path(argv[4]);
+            if (save_path.is_absolute()) {
+                args.save_path = save_path;
+            } else {
+                args.save_path = fs::current_path() / save_path;
+            }
+            
+            std::cout << "Mode: Oxford Dataset" << std::endl;
+            std::cout << "Image Path: " << args.image_path << std::endl;
+            std::cout << "Label Path: " << args.label_path << std::endl;
+            std::cout << "Save Path: " << args.save_path << std::endl;
+            
+            // Check for optional network type and binary mode flags
+            for (int i = 5; i < argc; i++) {
+                std::string arg = argv[i];
+                
+                // Check for binary mode flag
+                if (arg == "--binary") {
+                    args.binary_mode = true;
+                    std::cout << "Binary Mode: Enabled" << std::endl;
+                    continue;
+                }
+                
+                // Check for neural network type
+                if (arg.substr(0, 6) == "--net=") {
+                    std::string net_type = arg.substr(6);
+                    if (net_type == "cnn") {
+                        args.net_type = ModelArgs::CNN;
+                        std::cout << "Neural Network: CNN" << std::endl;
+                    } else if (net_type == "convnext") {
+                        args.net_type = ModelArgs::CONVNEXT;
+                        std::cout << "Neural Network: ConvNeXt" << std::endl;
+                    } else if (net_type == "mobilevit") {
+                        args.net_type = ModelArgs::MOBILEVIT;
+                        std::cout << "Neural Network: MobileViT" << std::endl;
+                    } else {
+                        std::cerr << "Warning: Unknown network type '" << net_type << "'. Using default." << std::endl;
+                    }
+                }
+            }
+            
+            // Validate paths
+            if (!fs::exists(args.image_path)) {
+                std::cerr << "Error: Image path does not exist: " << args.image_path << std::endl;
+                exit(1);
+            }
+            
+            if (!fs::exists(args.label_path)) {
+                std::cerr << "Error: Label path does not exist: " << args.label_path << std::endl;
+                exit(1);
+            }
+        }
+        else {
+            std::cerr << "Invalid mode: " << mode << std::endl;
+            std::cerr << "Usage:" << std::endl;
+            std::cerr << "  " << argv[0] << " dataset <mnist_data_path> <save_path> " << std::endl;
+            std::cerr << "  " << argv[0] << " image <image_path> <label_path> <save_path> [--net=<cnn|convnext|mobilevit>] [--binary]" << std::endl;
+            exit(1);
+        }
+        
+        return args;
+    }
 } // namespace utils
 
